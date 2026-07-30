@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Production builds
+dist
+build
+.vercel
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Local Databases & Logs
+ci_insight_pgdata
+ci_insight.db
+*.log
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

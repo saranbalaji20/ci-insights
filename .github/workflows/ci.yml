@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run Tests (TAP output)
+        run: |
+          node -e "
+            const flakyPass = Math.random() > 0.5;
+            console.log('ok 1 - user authentication flow test');
+            if (flakyPass) {
+              console.log('ok 2 - flaky payment gateway response test');
+            } else {
+              console.log('not ok 2 - flaky payment gateway response test');
+              process.exitCode = 1;
+            }
+          "
