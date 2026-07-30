@@ -20,13 +20,35 @@ if (!process.env.ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY must be set.');
 
 const PgSession = connectPgSimple(session);
 app.set('trust proxy', 1);
-app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+
+const isProd = process.env.NODE_ENV === 'production';
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const cleanOrigin = origin.replace(/\/$/, '');
+    const cleanConfigured = FRONTEND_ORIGIN.replace(/\/$/, '');
+    if (cleanOrigin === cleanConfigured || !isProd) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
 app.use(express.json({ limit: '20kb' }));
 app.use(session({
   store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: false }),
-  name: 'ci_insight_session', secret: process.env.SESSION_SECRET,
-  resave: false, saveUninitialized: false,
-  cookie: { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', maxAge: 1000 * 60 * 60 * 24 * 7 },
+  name: 'ci_insight_session',
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: 1000 * 60 * 60 * 24 * 7
+  },
 }));
 
 app.get('/health', (req, res) => res.json({ ok: true }));

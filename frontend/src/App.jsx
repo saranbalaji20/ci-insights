@@ -87,35 +87,76 @@ export default function App() {
         setStandaloneMode(false);
       })
       .catch(() => {
-        // Fallback for Vercel / standalone mode
-        setUser({ id: 1, email: 'demo@ci-insight.io', isDemo: true });
+        // Fallback for Vercel / standalone mode without backend server
         setStandaloneMode(true);
-        setSettings({ repository: 'octocat/ci-insight-demo', hasGitHubToken: true, hasAnthropicApiKey: true, configured: true });
+        const savedUser = localStorage.getItem('ci_insight_current_user');
+        if (savedUser) {
+          try {
+            const u = JSON.parse(savedUser);
+            setUser(u);
+            const savedSettings = localStorage.getItem(`ci_settings_${u.email}`);
+            if (savedSettings) {
+              setSettings(JSON.parse(savedSettings));
+            } else {
+              setSettings({ repository: '', githubToken: '', anthropicApiKey: '', configured: false });
+            }
+          } catch (e) {
+            setUser(null);
+          }
+        } else {
+          setUser(null);
+        }
       });
   }, []);
 
   useEffect(() => {
     if (user && !user.isDemo) {
-      api('/api/settings').then(({ settings: value }) => setSettings(value)).catch(() => setSettings(null));
+      if (standaloneMode) {
+        const savedSettings = localStorage.getItem(`ci_settings_${user.email}`);
+        if (savedSettings) {
+          setSettings(JSON.parse(savedSettings));
+        } else {
+          setSettings({ repository: '', githubToken: '', anthropicApiKey: '', configured: false });
+        }
+      } else {
+        api('/api/settings').then(({ settings: value }) => setSettings(value)).catch(() => setSettings(null));
+      }
     }
-  }, [user]);
+  }, [user, standaloneMode]);
 
   if (user === undefined) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
         <div style={{ fontSize: 36, marginBottom: 16 }} className="animate-spin">⚡</div>
-        <p style={{ color: 'var(--text-muted)' }}>Initializing CI Insight AI Engine…</p>
+        <p style={{ color: 'var(--text-muted)' }}>Initializing CI Insight Engine…</p>
       </div>
     );
   }
 
   if (!user || (!user.isDemo && page === 'auth')) {
-    return <AuthPage onAuthenticated={(u) => { setUser(u); setStandaloneMode(false); }} onDemo={() => { setUser({ id: 1, email: 'demo@ci-insight.io', isDemo: true }); setStandaloneMode(true); setSettings({ repository: 'octocat/ci-insight-demo', hasGitHubToken: true, hasAnthropicApiKey: true, configured: true }); }} />;
+    return (
+      <AuthPage
+        standaloneMode={standaloneMode}
+        onAuthenticated={(u) => {
+          setUser(u);
+        }}
+        onDemo={() => {
+          const demoUser = { id: 1, email: 'demo@ci-insight.io', isDemo: true };
+          if (standaloneMode) {
+            localStorage.setItem('ci_insight_current_user', JSON.stringify(demoUser));
+          }
+          setUser(demoUser);
+          setSettings({ repository: 'octocat/ci-insight-demo', hasGitHubToken: true, hasAnthropicApiKey: true, configured: true });
+        }}
+      />
+    );
   }
 
   const signOut = async () => {
     if (!standaloneMode) {
       await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    } else {
+      localStorage.removeItem('ci_insight_current_user');
     }
     setUser(null);
     setSettings(null);
@@ -141,8 +182,8 @@ export default function App() {
               </div>
               <p style={{ color: 'var(--text-muted)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                 <span className="glow-dot active"></span>
-                {settings?.repository ? <code>{settings.repository}</code> : 'Connect a GitHub Repository'}
-                {standaloneMode && <span style={{ color: 'var(--accent-amber)', fontSize: 11, marginLeft: 6 }}>(Interactive Vercel Global Demo)</span>}
+                {settings?.repository ? <code>{settings.repository}</code> : 'Connect a GitHub Repository in Settings'}
+                {standaloneMode && <span style={{ color: 'var(--accent-amber)', fontSize: 11, marginLeft: 6 }}>(Vercel Direct Mode)</span>}
               </p>
             </div>
           </div>
@@ -150,10 +191,10 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-main)' }}>{user.email}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{standaloneMode ? 'Guest Session' : 'Authenticated'}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{user.isDemo ? 'Guest Demo Session' : standaloneMode ? 'Browser Local Session' : 'Authenticated'}</div>
             </div>
             <button onClick={signOut} className="btn-secondary" style={{ padding: '7px 12px', fontSize: 13 }}>
-              {standaloneMode ? 'Exit Demo' : 'Log out'}
+              {user.isDemo ? 'Exit Demo' : 'Log out'}
             </button>
           </div>
         </header>
@@ -178,10 +219,10 @@ export default function App() {
 
         {/* Tab Content Views */}
         {page === 'overview' && <OverviewView onNavigate={setPage} />}
-        {page === 'runs' && <RunsView standaloneMode={standaloneMode} />}
+        {page === 'runs' && <RunsView standaloneMode={standaloneMode} settings={settings} user={user} />}
         {page === 'ai-insights' && <AIInsightsView standaloneMode={standaloneMode} settings={settings} />}
         {page === 'flaky' && <FlakyView standaloneMode={standaloneMode} />}
-        {page === 'settings' && <SettingsPage settings={settings} onSaved={setSettings} standaloneMode={standaloneMode} />}
+        {page === 'settings' && <SettingsPage settings={settings} onSaved={setSettings} standaloneMode={standaloneMode} user={user} />}
       </div>
     </div>
   );
@@ -291,7 +332,7 @@ function OverviewView({ onNavigate }) {
   );
 }
 
-function RunsView({ standaloneMode }) {
+function RunsView({ standaloneMode, settings, user }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -302,6 +343,16 @@ function RunsView({ standaloneMode }) {
   const load = async () => {
     setLoading(true);
     if (standaloneMode) {
+      if (user?.email) {
+        const savedRuns = localStorage.getItem(`ci_runs_${user.email}`);
+        if (savedRuns) {
+          try {
+            setRuns(JSON.parse(savedRuns));
+            setLoading(false);
+            return;
+          } catch (e) {}
+        }
+      }
       setRuns(MOCK_RUNS);
       setLoading(false);
       return;
@@ -316,16 +367,47 @@ function RunsView({ standaloneMode }) {
     }
   };
 
-  useEffect(() => { load(); }, [standaloneMode]);
+  useEffect(() => { load(); }, [standaloneMode, user?.email]);
 
   const sync = async () => {
     setSyncing(true);
     setError('');
     if (standaloneMode) {
-      setTimeout(() => {
+      if (settings?.repository) {
+        try {
+          const headers = { Accept: 'application/vnd.github+json' };
+          if (settings.githubToken) headers.Authorization = `Bearer ${settings.githubToken}`;
+          const res = await fetch(`https://api.github.com/repos/${settings.repository}/actions/runs`, { headers });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.message || `GitHub API returned HTTP ${res.status}`);
+          }
+          const data = await res.json();
+          const fetchedRuns = (data.workflow_runs || []).map((r) => ({
+            id: r.id,
+            status: r.status,
+            conclusion: r.conclusion,
+            branch: r.head_branch,
+            commit_sha: r.head_sha ? r.head_sha.substring(0, 7) : 'head',
+            created_at: r.created_at,
+            html_url: r.html_url
+          }));
+          const updatedRuns = fetchedRuns.length > 0 ? fetchedRuns : MOCK_RUNS;
+          setRuns(updatedRuns);
+          if (user?.email) {
+            localStorage.setItem(`ci_runs_${user.email}`, JSON.stringify(updatedRuns));
+          }
+        } catch (err) {
+          setError(`GitHub Sync failed: ${err.message}. Check your repo format (owner/repo) and GitHub Personal Access Token in Settings.`);
+        } finally {
+          setSyncing(false);
+        }
+        return;
+      } else {
+        setError('Please configure your GitHub Repository (e.g. owner/repository) in Settings tab first.');
         setSyncing(false);
-      }, 1000);
-      return;
+        return;
+      }
     }
     try {
       await api('/api/sync', { method: 'POST' });
@@ -421,7 +503,7 @@ function RunsView({ standaloneMode }) {
         </div>
       </div>
 
-      {selectedRun && <RunDetail run={selectedRun} onClose={() => setSelectedRun(null)} onExplained={explained} standaloneMode={standaloneMode} />}
+      {selectedRun && <RunDetail run={selectedRun} onClose={() => setSelectedRun(null)} onExplained={explained} standaloneMode={standaloneMode} settings={settings} />}
     </div>
   );
 }
@@ -438,7 +520,7 @@ function StatusBadge({ conclusion, status }) {
   );
 }
 
-function RunDetail({ run, onClose, onExplained, standaloneMode }) {
+function RunDetail({ run, onClose, onExplained, standaloneMode, settings }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -446,8 +528,35 @@ function RunDetail({ run, onClose, onExplained, standaloneMode }) {
     setBusy(true);
     setError('');
     if (standaloneMode) {
+      if (settings?.anthropicApiKey) {
+        try {
+          const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': settings.anthropicApiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+              'dangerously-allow-browser-headers': 'true'
+            },
+            body: JSON.stringify({
+              model: 'claude-3-5-sonnet-20241022',
+              max_tokens: 1000,
+              messages: [{ role: 'user', content: `Analyze this failed CI workflow run for repository ${settings?.repository || 'repo'}. Run ID: ${run.id}, Branch: ${run.branch}. Identify potential root causes and suggest code fixes.` }]
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.content?.[0]?.text || 'No response from Anthropic API.';
+            onExplained(run.id, text);
+            setBusy(false);
+            return;
+          }
+        } catch (e) {
+          console.warn('Direct Anthropic API call failed, using heuristic fallback:', e);
+        }
+      }
       setTimeout(() => {
-        onExplained(run.id, run.explanation || `### 🚨 AI Failure Analysis\n**Root Cause:** Build Script Failure\n**Severity:** High\n\n**Explanation:** Action exited during script execution.\n\n**💡 Recommended Fix:**\n\`\`\`bash\nnpm test -- --u\n\`\`\``);
+        onExplained(run.id, run.explanation || `### 🚨 AI Failure Analysis for ${run.branch}\n**Root Cause:** Workflow Execution Step Failure\n**Severity:** High\n\n**Explanation:** Build or test step failed in run #${run.id} on branch ${run.branch}.\n\n**💡 Recommended Fix:**\n\`\`\`bash\n# Verify dependencies and run tests locally:\nnpm ci\nnpm test\n\`\`\``);
         setBusy(false);
       }, 800);
       return;
@@ -513,6 +622,33 @@ function AIInsightsView({ standaloneMode, settings }) {
     setCopilotAnswer('');
     
     if (standaloneMode) {
+      if (settings?.anthropicApiKey) {
+        try {
+          const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': settings.anthropicApiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+              'dangerously-allow-browser-headers': 'true'
+            },
+            body: JSON.stringify({
+              model: 'claude-3-5-sonnet-20241022',
+              max_tokens: 1000,
+              messages: [{ role: 'user', content: copilotQuery }]
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setCopilotAnswer(`### 🤖 Claude AI Copilot Response\n\n${data.content?.[0]?.text}`);
+            setAsking(false);
+            return;
+          }
+        } catch (e) {
+          console.warn('Direct Claude call failed, falling back:', e);
+        }
+      }
+
       setTimeout(() => {
         setCopilotAnswer(`### 🤖 Claude AI Copilot Response\n\nFor your question **"${copilotQuery}"**:\n\n1. **Optimization**: Ensure \`actions/cache\` is added to persist dependency directories between workflow runs.\n2. **Matrix Execution**: Use \`strategy.matrix\` to split test steps.\n\n\`\`\`yaml\n- uses: actions/cache@v4\n  with:\n    path: ~/.npm\n    key: \${{ runner.os }}-node-\${{ hashFiles('**/package-lock.json') }}\n\`\`\``);
         setAsking(false);
@@ -654,23 +790,40 @@ function FlakyView({ standaloneMode }) {
   );
 }
 
-function SettingsPage({ settings, onSaved, standaloneMode }) {
+function SettingsPage({ settings, onSaved, standaloneMode, user }) {
   const [repository, setRepository] = useState(settings?.repository || '');
-  const [githubToken, setGithubToken] = useState('');
-  const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [githubToken, setGithubToken] = useState(settings?.githubToken || '');
+  const [anthropicApiKey, setAnthropicApiKey] = useState(settings?.anthropicApiKey || '');
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (settings) {
+      if (settings.repository !== undefined) setRepository(settings.repository);
+      if (settings.githubToken !== undefined) setGithubToken(settings.githubToken);
+      if (settings.anthropicApiKey !== undefined) setAnthropicApiKey(settings.anthropicApiKey);
+    }
+  }, [settings]);
 
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
     setSaved(false);
     if (standaloneMode) {
-      setTimeout(() => {
-        onSaved({ repository, hasGitHubToken: true, hasAnthropicApiKey: true, configured: true });
-        setSaved(true);
-        setBusy(false);
-      }, 600);
+      const newSettings = {
+        repository,
+        githubToken,
+        anthropicApiKey,
+        hasGitHubToken: !!githubToken,
+        hasAnthropicApiKey: !!anthropicApiKey,
+        configured: true
+      };
+      if (user?.email) {
+        localStorage.setItem(`ci_settings_${user.email}`, JSON.stringify(newSettings));
+      }
+      onSaved(newSettings);
+      setSaved(true);
+      setBusy(false);
       return;
     }
     try {
@@ -691,12 +844,12 @@ function SettingsPage({ settings, onSaved, standaloneMode }) {
         <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
             GitHub Repository
-            <input className="glass-input" value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="owner/repository" required style={{ marginTop: 6 }} />
+            <input className="glass-input" value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="owner/repository (e.g. octocat/ci-insight)" required style={{ marginTop: 6 }} />
           </label>
 
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
             GitHub Personal Access Token (PAT)
-            <input type="password" className="glass-input" value={githubToken} onChange={(e) => setGithubToken(e.target.value)} placeholder="github_pat_…" style={{ marginTop: 6 }} />
+            <input type="password" className="glass-input" value={githubToken} onChange={(e) => setGithubToken(e.target.value)} placeholder="github_pat_… or ghp_…" style={{ marginTop: 6 }} />
           </label>
 
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
@@ -704,7 +857,7 @@ function SettingsPage({ settings, onSaved, standaloneMode }) {
             <input type="password" className="glass-input" value={anthropicApiKey} onChange={(e) => setAnthropicApiKey(e.target.value)} placeholder="sk-ant-…" style={{ marginTop: 6 }} />
           </label>
 
-          {saved && <p style={{ color: '#34d399', fontSize: 13 }}>✓ Settings saved successfully!</p>}
+          {saved && <p style={{ color: '#34d399', fontSize: 13 }}>✓ Settings saved successfully for {user?.email || 'session'}!</p>}
 
           <button disabled={busy} className="btn-primary">
             {busy ? 'Saving Settings…' : 'Save Repository Settings'}
@@ -715,29 +868,23 @@ function SettingsPage({ settings, onSaved, standaloneMode }) {
       <div className="glass-card" style={{ padding: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>🚀 Deploying to Vercel</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
-          CI Insight is configured for instant 1-click deployment on Vercel.
+          CI Insight supports dual operation modes on Vercel:
         </p>
+        <ul style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6, paddingLeft: 18, marginBottom: 16 }}>
+          <li style={{ marginBottom: 6 }}><strong>Vercel Direct Browser Mode:</strong> Log in with your email, set your GitHub repository & PAT token in Settings, and sync workflow runs directly from your browser!</li>
+          <li><strong>Full Centralized Backend Mode:</strong> Deploy `backend/` to Render/Railway and set `VITE_API_BASE_URL` in Vercel settings.</li>
+        </ul>
 
         <div className="code-block" style={{ fontSize: 12, marginBottom: 16 }}>
-          # Vercel Environment Variable<br />
+          # Vercel Environment Variable (Optional for Backend Mode)<br />
           VITE_API_BASE_URL=https://your-backend.onrender.com
-        </div>
-
-        <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Git Commands to Push to New Repo:</h3>
-        <div className="code-block" style={{ fontSize: 12 }}>
-          git init<br />
-          git add .<br />
-          git commit -m "feat: modern CI Insight UI and AI Insights Hub"<br />
-          git branch -M main<br />
-          git remote add origin https://github.com/YOUR_USERNAME/ci-insight.git<br />
-          git push -u origin main
         </div>
       </div>
     </div>
   );
 }
 
-function AuthPage({ onAuthenticated, onDemo }) {
+function AuthPage({ onAuthenticated, onDemo, standaloneMode }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLogin, setIsLogin] = useState(true);
@@ -748,6 +895,15 @@ function AuthPage({ onAuthenticated, onDemo }) {
     e.preventDefault();
     setBusy(true);
     setError('');
+
+    if (standaloneMode) {
+      const u = { id: Date.now(), email, isDemo: false };
+      localStorage.setItem('ci_insight_current_user', JSON.stringify(u));
+      onAuthenticated(u);
+      setBusy(false);
+      return;
+    }
+
     try {
       const data = await api(`/api/auth/${isLogin ? 'login' : 'signup'}`, { method: 'POST', body: JSON.stringify({ email, password }) });
       onAuthenticated(data.user);
@@ -771,13 +927,13 @@ function AuthPage({ onAuthenticated, onDemo }) {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
-            Email Address
-            <input type="email" className="glass-input" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ marginTop: 6 }} />
+            Email / Gmail Address
+            <input type="email" className="glass-input" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ marginTop: 6 }} placeholder="you@gmail.com" />
           </label>
 
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
             Password
-            <input type="password" className="glass-input" value={password} onChange={(e) => setPassword(e.target.value)} minLength="12" required style={{ marginTop: 6 }} />
+            <input type="password" className="glass-input" value={password} onChange={(e) => setPassword(e.target.value)} minLength="6" required style={{ marginTop: 6 }} placeholder="••••••••" />
           </label>
 
           {error && <p style={{ color: 'var(--accent-rose)', fontSize: 13 }}>{error}</p>}
@@ -788,15 +944,16 @@ function AuthPage({ onAuthenticated, onDemo }) {
         </form>
 
         <button onClick={() => setIsLogin(!isLogin)} className="btn-secondary" style={{ width: '100%', marginTop: 12, fontSize: 13 }}>
-          {isLogin ? 'Need an account? Sign up' : 'Already have an account? Log in'}
+          {isLogin ? 'Need an account? Sign up with Email' : 'Already have an account? Log in'}
         </button>
 
         <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '20px 0' }} />
 
         <button onClick={onDemo} className="btn-secondary" style={{ width: '100%', background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc', border: '1px dashed rgba(99, 102, 241, 0.4)', fontSize: 13 }}>
-          ⚡ Enter Interactive Global Demo Mode
+          ⚡ Enter Interactive Guest Demo Mode
         </button>
       </div>
     </div>
   );
 }
+
